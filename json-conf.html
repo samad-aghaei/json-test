@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <link rel="icon" href="data:,">
+
+        <style>
+            json-conf:not( :defined )
+            {
+                display: none
+            }
+        </style>
+    </head>
+
+    <body>
+
+        <json-conf>
+            [
+                {
+                	"AA":"O",
+                	"B":"U"
+                },
+                {
+                    "": null,
+                    "D": "Mihan TV",
+                    "E": "en-US",
+                    "F": "2017-12-12T18:12:32.125Z",
+                    "G": {
+                    	"H": "d",
+                    	"P": {
+                    			"K": "R"
+                    		},
+                    	"L": 45,
+                    	"I": 
+                    	[
+                    		{
+                    			"J": "Q"
+                    		},
+                    		{
+                    			"K": "R"
+                    		}
+                    	],
+                    	"M": "lll"
+                    },
+                    "N": 34
+                }
+            ]
+  	</json-conf>
+
+
+
+
+<script>
+    ;(
+        async renderer =>
+    {
+        let stream = new ReadableStream(
+        {
+            async * [ Symbol.asyncIterator ]()
+            {
+                while ( true )
+                {
+                    yield ( await stream.read() ).value
+                }
+            },
+            async pull( controller )
+            {
+                const setType = property =>
+                (
+                    {
+                        colorSet : { type: 'string' , tag: 'li', opening: ':', closing: ';' },
+                        options  : { type: 'number' , tag: 'li', opening: ':', closing: ';' }
+                    }
+                )[ key ]
+
+                const properties = property =>
+                (
+                    {
+                        string  : { type: 'string'  , tag: 'li', opening: ':', closing: ';' },
+                        number  : { type: 'number'  , tag: 'li', opening: ':', closing: ';' },
+                        boolean : { type: 'boolean' , tag: 'li', opening: ':', closing: ';' },
+                        null    : { type: 'null'    , tag: 'li', opening: ':', closing: ';' },
+                        object  : { type: 'object'  , tag: 'ul', opening: '{', closing: '}' },
+                        array   : { type: 'array'   , tag: 'ul', opening: '[', closing: ']' }
+                    }
+                )[
+                    Object.prototype.toString.call( property )
+                    .split(' ')[ 1 ].slice( 0, -1 ).toLowerCase()
+                ]
+
+                const getSpan = ( text, className ) =>
+                {
+                    let element = document.createElement( 'span' )
+                    element.innerText = text
+
+                    if( className )
+                    {
+                        element.classList.add( className )
+                    }
+
+                    return element
+                }
+
+                for await ( const [ [ key, value ], fragment, resolver ] of this )
+                {
+                    if( resolver )
+                    {
+                        resolver( fragment )
+                        continue
+                    }
+
+                    let props = properties( value ),
+                        child = document.createElement( props.tag ),
+                        parent = fragment?.map?.[ fragment.map.length -1 ]
+
+                    child.classList.add( `${ props.type }-${ key }` )
+
+                    child.replaceChildren(
+                        getSpan( props.opening/*, 'opening'*/ ),
+                        getSpan( props.closing/*, 'closing'*/ )
+                    )
+
+                    if( parent )
+                    {
+                        parent = --parent[ 0 ] ? parent[ 1 ] : fragment.map.pop()[ 1 ]
+                        parent.insertBefore( child, parent.lastChild )
+                    }
+                    else 
+                    {
+                        fragment.appendChild( child )
+                    }
+
+                    if( props.tag === 'ul' )
+                    {
+                        ( fragment.map = fragment.map ?? [] )
+                        .push([ Object.keys( value ).length, child ])
+
+                        child.insertBefore( getSpan( key/*, 'parent'*/ ), child.firstChild )
+                    }
+                    else
+                    {
+                        child.insertBefore( getSpan( key /* , 'key'*/   ), child.firstChild )
+                        child.insertBefore( getSpan( value/*, 'value'*/ ), child.lastChild )
+                    }
+                }
+            },
+            async start( controller )
+            {
+/*              renderer = function parse( jsonString, replacer )
+                {
+                    return new Promise( resolve =>
+                        controller.enqueue([ jsonString, replacer, resolve ])
+                    )
+                }
+
+                Reflect.setPrototypeOf( renderer, null )*/
+
+                renderer = jsonString =>
+                {
+                    return new Response( jsonString ).json()
+                    .then ( json =>
+                    {
+                        let resolver,
+                            fragment = new DocumentFragment(),
+                            resolve  = new Promise( resolve => resolver = resolve )
+
+                        JSON.stringify( json, ( ...args ) =>
+                            controller.enqueue([ args, fragment, null ]) ?? args[ 1 ]
+                        )
+
+                        controller.enqueue([ [], fragment, resolver ])
+                        return resolve
+                    })
+                    .catch( error =>
+                    {
+                        throw error
+                    })
+                }
+
+            }
+        },
+            new CountQueuingStrategy({ highWaterMark: 1 })
+        ).getReader()
+
+        return renderer
+    })()
+    .then( render =>
+    {
+        customElements.define( 'json-conf', class extends HTMLElement
+        {
+            connectedCallback()
+            {
+                render( this.innerText )
+                .then( fragment =>
+                {
+                    let style = new CSSStyleSheet()
+                    style.replaceSync( `
+                        :host {
+
+                        }
+
+                        li {
+                            list-style: none
+                        }
+
+                        ul {
+                            font-size: 13px;
+                            line-height: 1.2;
+                            font-family: monospace;
+                            padding-left: 0;
+                            margin-left: 20px;
+                            overflow: auto
+                        }
+                    `)
+
+                    let shadow = this.attachShadow({ mode: 'closed' })
+                    shadow.adoptedStyleSheets = [ style ]
+
+                    this.replaceChildren(
+                        shadow.appendChild( fragment )
+                    )
+                })
+            }
+
+            disconnectedCallback()
+            {
+                console.log('deleted')
+            }
+
+            adoptedCallback(){}
+            attributeChangedCallback(){}
+            observedAttributes(){}
+        })
+    })
+    .catch( console.log )
+
+</script>
